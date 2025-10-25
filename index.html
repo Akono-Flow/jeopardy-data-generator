@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CSV → Jeopardy JSON Converter (Final with CSV Export)</title>
+<style>
+:root{
+  --bg:#0f1720;--card:#0b1220;--muted:#9aa7b2;--accent:#26a69a;
+  --warn:#ff4b6e;--good:#3ad29f;--edited:#fff17625;
+  color-scheme:dark;
+}
+html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#e6eef3;background:linear-gradient(180deg,#051021 0%,#071729 60%)}
+.wrap{max-width:1200px;margin:28px auto;padding:20px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-radius:12px;box-shadow:0 6px 30px rgba(3,10,18,0.7)}
+h1{margin:0 0 10px;font-size:20px}
+p.lead{margin:0 0 18px;color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+.btn{background:var(--accent);color:#042025;border:none;padding:10px 14px;border-radius:8px;cursor:pointer;font-weight:600}
+.btn.ghost{background:transparent;border:1px solid rgba(255,255,255,0.04);color:var(--muted)}
+input[type=file]{display:none}
+input[type=text]{padding:8px 10px;border-radius:6px;border:none;outline:none;background:#0a1622;color:#e6eef3}
+label.small{font-size:13px;color:var(--muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 5px;text-align:left;border-bottom:1px dashed rgba(255,255,255,0.05);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;position:sticky;top:0;background:#0c1a28;}
+td[contenteditable="true"]{cursor:text}
+tr.missing{background:rgba(255,75,110,0.1)}
+tr.missing:hover{background:rgba(255,75,110,0.15)}
+tr.edited:not(.missing){background:var(--edited)}
+.warn-ico{color:var(--warn);font-weight:bold;margin-right:4px}
+pre{white-space:pre-wrap;word-break:break-word;font-size:13px;background:rgba(255,255,255,0.03);padding:10px;border-radius:8px;color:#dff3ef}
+summary{cursor:pointer;padding:8px;border-radius:8px;list-style:none;background:rgba(255,255,255,0.02);}
+.details-panel{margin-top:10px}
+.small{font-size:12px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 400px;gap:16px}
+@media (max-width:980px){.grid{grid-template-columns:1fr}}
+.searchbox{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.searchbox input{flex:1;padding:8px 10px;border-radius:6px;border:none;background:#0a1622;color:#e6eef3}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>CSV → Jeopardy JSON Converter (With CSV Export)</h1>
+<p class="lead">Clean, edit, and convert your quiz data into Jeopardy JSON or export it back to a cleaned CSV file.</p>
+
+<div class="controls">
+  <label class="btn ghost" for="csvFile">Load CSV</label>
+  <input id="csvFile" type="file" accept=".csv,text/csv"/>
+  <button id="parseBtn" class="btn">Parse & Preview</button>
+  <button id="convertBtn" class="btn">Convert → Build JSON</button>
+  <button id="downloadBtn" class="btn">Download JSON</button>
+  <button id="downloadCSVBtn" class="btn ghost">Download Cleaned CSV</button>
+  <button id="resetBtn" class="btn ghost" style="margin-left:auto;">Reset Filters & Edits</button>
+</div>
+
+<div class="controls">
+  <label class="small">Delimiter:
+    <input type="text" id="delimiterInput" value="Ans:" style="width:100px">
+  </label>
+  <label class="small"><input type="checkbox" id="skipIncomplete"> Skip rows with missing question or answer</label>
+</div>
+
+<div class="grid">
+<div>
+  <div class="searchbox">
+    <input type="text" id="searchInput" placeholder="Search category or question...">
+    <span class="small" id="searchCount"></span>
+  </div>
+  <div style="max-height:520px;overflow:auto;border-radius:8px;background:#0c1a28">
+    <table id="previewTable"><thead><tr><th>⚙️</th><th>Category</th><th>Question</th><th>Round</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="small" id="stats" style="margin-top:6px"></div>
+
+  <details open style="margin-top:14px">
+    <summary><strong>JSON Preview (live)</strong></summary>
+    <div class="details-panel"><pre id="jsonPreview">{}</pre></div>
+  </details>
+</div>
+
+<div>
+  <div style="background:#0c1a28;padding:10px;border-radius:10px;margin-bottom:14px">
+    <strong>Actions & Info</strong>
+    <p class="small" style="margin-top:8px">Splits the question field at the first occurrence of your chosen delimiter (default <code>Ans:</code>). If missing, answer will be empty. Rounds map to difficulties 1–5 as per your rules.</p>
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0">
+    <div><strong>Current JSON Metadata</strong></div>
+    <div style="margin-top:8px"><pre id="metaPreview">{"categories":0,"questions":0}</pre></div>
+    <hr style="border:none;border-top:1px solid rgba(255,255,255,0.05);margin:10px 0">
+    <div><strong>Notes</strong>
+      <ul class="small">
+        <li>Delimiter used: configurable.</li>
+        <li>Special categories get a <code>type</code>: <code>visual</code> or <code>audio</code>.</li>
+        <li>Inline edits save automatically and revalidate live.</li>
+        <li>Reset restores original CSV; export lets you save a cleaned version.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="background:#0c1a28;padding:10px;border-radius:10px">
+    <strong>Log</strong>
+    <pre id="log" style="height:200px;overflow:auto;font-size:12px;margin-top:6px">Ready.</pre>
+  </div>
+</div>
+</div>
+</div>
+
+<script>
+// --- Utility helpers ---
+function parseCSV(text){
+  text=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const rows=[];let cur='',row=[],inQ=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(inQ){
+      if(c=='"'){ if(text[i+1]=='"'){cur+='"';i++;} else inQ=false;}
+      else cur+=c;
+    }else{
+      if(c=='"')inQ=true;
+      else if(c==','){row.push(cur);cur='';}
+      else if(c=='\n'){row.push(cur);rows.push(row);row=[];cur='';}
+      else cur+=c;
+    }
+  }
+  if(cur||row.length)row.push(cur);
+  if(row.length)rows.push(row);
+  return rows;
+}
+function cleanText(s){return String(s??'').trim().replace(/\s+/g,' ');}
+function mapHeaders(header){
+  const m={category:-1,question:-1,round:-1};
+  header.forEach((h,i)=>{const l=h.trim().toLowerCase();
+    if(l.includes('category'))m.category=i;
+    if(l.includes('question'))m.question=i;
+    if(l.includes('round'))m.round=i;
+  });
+  return m;
+}
+function roundToDifficulty(r){const n=parseInt(r,10);if(isNaN(n))return 5;if(n>=1&&n<=4)return n;return 5;}
+const specialVisuals=new Set(['local and international affairs','theatre and cinema','sports']);
+const specialAudio=new Set(['music']);
+
+let rawRows=[],originalRows=[],map={},delimiter='Ans:',skipIncomplete=false,filterTerm='';
+const tbody=document.querySelector('#previewTable tbody');
+const log=document.getElementById('log');
+const jsonPreview=document.getElementById('jsonPreview');
+const csvInput=document.getElementById('csvFile');
+const stats=document.getElementById('stats');
+const searchInput=document.getElementById('searchInput');
+const searchCount=document.getElementById('searchCount');
+const metaPreview=document.getElementById('metaPreview');
+const resetBtn=document.getElementById('resetBtn');
+const downloadCSVBtn=document.getElementById('downloadCSVBtn');
+
+function logMsg(m){log.textContent='['+new Date().toLocaleTimeString()+'] '+m+'\n'+log.textContent;}
+
+// --- File load ---
+csvInput.addEventListener('change',()=>loadCSV(csvInput.files[0]));
+function loadCSV(file){
+  if(!file)return;
+  const fr=new FileReader();
+  fr.onload=e=>{
+    rawRows=parseCSV(e.target.result);
+    originalRows=structuredClone(rawRows); // backup
+    map=mapHeaders(rawRows[0].map(cleanText));
+    renderPreview();
+    logMsg(`Loaded ${rawRows.length-1} rows from ${file.name}`);
+  };
+  fr.readAsText(file);
+}
+
+// --- Reset handler ---
+resetBtn.onclick=()=>{
+  if(!rawRows.length)return alert("No CSV loaded to reset.");
+  if(!confirm("Are you sure you want to reset all edits and filters?"))return;
+  rawRows=structuredClone(originalRows);
+  delimiter='Ans:';skipIncomplete=false;filterTerm='';
+  document.getElementById('delimiterInput').value='Ans:';
+  document.getElementById('skipIncomplete').checked=false;
+  searchInput.value='';
+  renderPreview();
+  logMsg("All edits and filters reset.");
+};
+
+// --- UI inputs ---
+document.getElementById('parseBtn').onclick=()=>{if(!rawRows.length)return alert('Load CSV first');renderPreview();};
+document.getElementById('delimiterInput').oninput=e=>{delimiter=e.target.value.trim()||'Ans:';renderPreview();};
+document.getElementById('skipIncomplete').onchange=e=>{skipIncomplete=e.target.checked;renderPreview();};
+searchInput.oninput=e=>{filterTerm=e.target.value.toLowerCase();renderPreview();};
+
+// --- Preview ---
+function renderPreview(){
+  tbody.innerHTML='';
+  if(rawRows.length<2){stats.textContent='No data';return;}
+  const data=rawRows.slice(1);
+  let valid=0,shown=0;
+  data.forEach((r,ri)=>{
+    const cat=cleanText(r[map.category]||''),ques=cleanText(r[map.question]||''),rnd=cleanText(r[map.round]||'');
+    if(filterTerm && !cat.toLowerCase().includes(filterTerm) && !ques.toLowerCase().includes(filterTerm))return;
+    shown++;
+    const tr=document.createElement('tr');tr.dataset.index=ri+1;
+    const warnTd=document.createElement('td');warnTd.style.width='20px';
+    const tdC=document.createElement('td'),tdQ=document.createElement('td'),tdR=document.createElement('td');
+    [tdC,tdQ,tdR].forEach(td=>td.contentEditable='true');
+    tdC.textContent=cat;tdQ.textContent=ques;tdR.textContent=rnd;
+    tr.append(warnTd,tdC,tdQ,tdR);
+    tbody.appendChild(tr);
+    const validate=()=>{
+      const q=tdQ.textContent.trim(),a=splitQA(q).answer.trim();
+      const miss=!q||!a;
+      tr.classList.toggle('missing',miss);
+      warnTd.innerHTML=miss?'<span class="warn-ico" title="Missing question or answer">⚠</span>':'';
+      if(!miss)valid++;
+    };
+    validate();
+    [tdC,tdQ,tdR].forEach(td=>{
+      td.addEventListener('input',()=>{
+        tr.classList.add('edited');
+        const idx=parseInt(tr.dataset.index);
+        rawRows[idx][map.category]=tdC.textContent;
+        rawRows[idx][map.question]=tdQ.textContent;
+        rawRows[idx][map.round]=tdR.textContent;
+        validate();
+      });
+    });
+  });
+  stats.textContent=`Showing: ${shown} | Valid: ${valid}`;
+  searchCount.textContent=`${shown} match${shown!==1?'es':''}`;
+}
+
+// --- QA split ---
+function splitQA(qRaw){
+  const q=cleanText(qRaw);
+  const del=delimiter.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const re=new RegExp(del+'\\s*','i');
+  const parts=q.split(re);
+  if(parts.length>1)return {question:parts.shift().trim(),answer:parts.join(del).trim()};
+  return {question:q,answer:''};
+}
+
+// --- Convert to JSON ---
+document.getElementById('convertBtn').onclick=()=>{
+  if(!rawRows.length)return alert('No CSV loaded');
+  const json=buildJeopardyJson();
+  jsonPreview.textContent=JSON.stringify(json,null,2);
+  metaPreview.textContent=JSON.stringify({categories:json.categories.length,questions:json.categories.reduce((a,c)=>a+(c.questions?.length||0),0)},null,2);
+  logMsg('Conversion complete');
+};
+
+// --- Build JSON ---
+function buildJeopardyJson(){
+  const data=rawRows.slice(1);
+  const cats=new Map();let total=0,skipped=0;
+  data.forEach(r=>{
+    const cat=cleanText(r[map.category]||'Uncategorized');
+    const qRaw=String(r[map.question]||''),rnd=cleanText(r[map.round]||'');
+    const {question,answer}=splitQA(qRaw);
+    if(skipIncomplete&&(!question||!answer)){skipped++;return;}
+    const diff=roundToDifficulty(rnd);
+    const low=cat.toLowerCase();
+    const qObj={question,answer,difficulty:diff};
+    if(specialVisuals.has(low))qObj.type='visual';
+    if(specialAudio.has(low))qObj.type='audio';
+    if(!cats.has(cat))cats.set(cat,{name:cat,questions:[]});
+    cats.get(cat).questions.push(qObj);total++;
+  });
+  logMsg(`Built JSON with ${cats.size} categories, ${total} questions${skipped?` (${skipped} skipped)`:""}.`);
+  return {categories:[...cats.values()]};
+}
+
+// --- Download JSON ---
+document.getElementById('downloadBtn').onclick=()=>{
+  const blob=new Blob([jsonPreview.textContent],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='jeopardy_export.json';
+  document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(a.href);
+  logMsg('JSON downloaded');
+};
+
+// --- Download Cleaned CSV ---
+downloadCSVBtn.onclick=()=>{
+  if(!rawRows.length)return alert("No data to export");
+  const csvText=rawRows.map(row=>
+    row.map(cell=>{
+      const s=String(cell??'').replace(/"/g,'""');
+      return /[",\n]/.test(s)?`"${s}"`:s;
+    }).join(',')
+  ).join('\n');
+  const blob=new Blob([csvText],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='jeopardy_cleaned.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  logMsg('Cleaned CSV exported.');
+};
+</script>
+</body>
+</html>
